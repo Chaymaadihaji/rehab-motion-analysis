@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib
-matplotlib.use("TkAgg")
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -554,21 +554,24 @@ for exercise_dir in exercise_dirs:
 
          rep_list = clusters_reps[cluster_id]
 
+    print(f"Clusters trouvés : {cluster_id}")
+    print(f"Nombre représentants : {len(rep_list)}")
+
     for rep_number, rep_idx in enumerate(rep_list):
 
         generate_video(
 
-    X,
+            X,
 
-    exercise_dir.name,
+            exercise_dir.name,
 
-    class_id,
+            class_id,
 
-    f"{cluster_id}_{rep_number}",
+            f"{cluster_id}_{rep_number}",
 
-    rep_idx,
+            rep_idx,
 
-    output_dir
-)
+            output_dir
+        )
 
 print("\n✅ Toutes les vidéos ont été générées.")
