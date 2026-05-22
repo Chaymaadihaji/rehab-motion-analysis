@@ -550,21 +550,25 @@ for exercise_dir in exercise_dirs:
         # GENERATE VIDEOS
         # ====================================================
 
-        for cluster_id, rep_idx in enumerate(reps):
+        for cluster_id in sorted(clusters_reps):
 
-            generate_video(
+         rep_list = clusters_reps[cluster_id]
 
-                X,
+    for rep_number, rep_idx in enumerate(rep_list):
 
-                exercise_dir.name,
+        generate_video(
 
-                class_id,
+    X,
 
-                cluster_id,
+    exercise_dir.name,
 
-                rep_idx,
+    class_id,
 
-                output_dir
-            )
+    f"{cluster_id}_{rep_number}",
+
+    rep_idx,
+
+    output_dir
+)
 
 print("\n✅ Toutes les vidéos ont été générées.")
