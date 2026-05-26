@@ -27,15 +27,7 @@ CHAINS = [
     [0, 12, 13, 14, 15],
     [0, 16, 17, 18, 19],
 ]
-LEFT_ARM  = [20, 4, 5, 6, 7]
 RIGHT_ARM = [20, 8, 9, 10, 11]
-
-def get_trace_joints(skel):
-    """Détecte automatiquement le bras qui bouge le plus."""
-    def mobility(joints):
-        traj = skel[:, joints, :]
-        return np.std(traj, axis=0).sum()
-    return RIGHT_ARM if mobility(RIGHT_ARM) >= mobility(LEFT_ARM) else LEFT_ARM
 
 plt.rcParams.update({
     'figure.facecolor': DARK_BG,
@@ -116,15 +108,14 @@ def redraw_trace():
     skel  = state["skel"]
     n_fr  = skel.shape[0]
     cmap  = matplotlib.colormaps["Oranges"]
-    trace_joints = get_trace_joints(skel)   # bras le plus mobile
 
     for fi in range(n_fr):
         t     = fi / max(n_fr - 1, 1)
         color = cmap(0.3 + 0.7 * t)
         x, y  = pose_to_plot(skel[fi])
-        ax_trace.plot(x[trace_joints], y[trace_joints],
+        ax_trace.plot(x[RIGHT_ARM], y[RIGHT_ARM],
                       color=color, lw=2.2, alpha=0.55 + 0.45 * t)
-        ax_trace.scatter(x[trace_joints], y[trace_joints],
+        ax_trace.scatter(x[RIGHT_ARM], y[RIGHT_ARM],
                          color=color, s=12, alpha=0.55 + 0.45 * t)
 
     # Squelette final
@@ -134,14 +125,11 @@ def redraw_trace():
     used = sorted(set(sum(CHAINS, [])))
     ax_trace.scatter(xf[used], yf[used], color=JOINT_COL, s=55)
 
-    # ── FIX : bounds zoomées sur la zone du bras droit ──────────────
-    arm_x = skel[:, trace_joints, 0].flatten()
-    arm_y = skel[:, trace_joints, 1].flatten()
-    pad_x = max((arm_x.max() - arm_x.min()) * 0.3, 0.05)
-    pad_y = max((arm_y.max() - arm_y.min()) * 0.3, 0.05)
-    ax_trace.set_xlim(arm_x.min() - pad_x, arm_x.max() + pad_x)
-    ax_trace.set_ylim(arm_y.min() - pad_y, arm_y.max() + pad_y)
-    ax_trace.set_aspect('equal', adjustable='box')
+    # ── FIX : utiliser les mêmes bounds que l'animation ──────────────
+    xmin, xmax, ymin, ymax = state["bounds"]
+    ax_trace.set_xlim(xmin, xmax)
+    ax_trace.set_ylim(ymin, ymax)
+    # PAS de set_aspect('equal') — laisse matplotlib adapter
     ax_trace.set_title("Trace du mouvement", fontsize=14, color="#ddddff")
     ax_trace.tick_params(colors='#666688', labelsize=7)
 
