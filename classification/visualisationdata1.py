@@ -116,93 +116,52 @@ def draw_frame(fi):
 # ============================================================
 def redraw_trace():
 
-    # supprimer ancienne colorbar
+    # Supprimer ancienne colorbar + toutes les orphelines
     if state["cb_trace"] is not None:
-        state["cb_trace"].ax.remove()
+        try:
+            state["cb_trace"].remove()
+        except Exception:
+            pass
         state["cb_trace"] = None
+
+    for ax in fig.axes:
+        if ax is not ax_anim and ax is not ax_trace:
+            try:
+                ax.remove()
+            except Exception:
+                pass
 
     ax_trace.clear()
     ax_trace.set_facecolor(PANEL_BG)
 
     skel = state["skel"]
     n_fr = skel.shape[0]
-
     cmap = matplotlib.colormaps["Oranges"]
 
     for fi in range(n_fr):
-
-        t = fi / max(n_fr - 1, 1)
+        t     = fi / max(n_fr - 1, 1)
         color = cmap(0.3 + 0.7 * t)
+        x, y  = pose_to_plot(skel[fi])
+        ax_trace.plot(x[RIGHT_ARM], y[RIGHT_ARM],
+                      color=color, lw=2.2, alpha=0.55 + 0.45 * t)
+        ax_trace.scatter(x[RIGHT_ARM], y[RIGHT_ARM],
+                         color=color, s=12, alpha=0.55 + 0.45 * t)
 
-        x, y = pose_to_plot(skel[fi])
-
-        ax_trace.plot(
-            x[RIGHT_ARM],
-            y[RIGHT_ARM],
-            color=color,
-            lw=2.2,
-            alpha=0.55 + 0.45 * t
-        )
-
-        ax_trace.scatter(
-            x[RIGHT_ARM],
-            y[RIGHT_ARM],
-            color=color,
-            s=12,
-            alpha=0.55 + 0.45 * t
-        )
-
-    # squelette final
+    # Squelette final
     xf, yf = pose_to_plot(skel[-1])
-
     for ci, chain in enumerate(CHAINS):
-        ax_trace.plot(
-            xf[chain],
-            yf[chain],
-            color=CHAIN_COLORS[ci],
-            lw=3
-        )
-
+        ax_trace.plot(xf[chain], yf[chain], color=CHAIN_COLORS[ci], lw=3)
     used = sorted(set(sum(CHAINS, [])))
-
-    ax_trace.scatter(
-        xf[used],
-        yf[used],
-        color=JOINT_COL,
-        s=55
-    )
+    ax_trace.scatter(xf[used], yf[used], color=JOINT_COL, s=55)
 
     ax_trace.set_aspect('equal')
-    ax_trace.set_title(
-        "Trace du mouvement",
-        fontsize=14,
-        color="#ddddff"
-    )
+    ax_trace.set_title("Trace du mouvement", fontsize=14, color="#ddddff")
 
-    # UNE seule colorbar
-    sm = plt.cm.ScalarMappable(
-        cmap='Oranges',
-        norm=plt.Normalize(0, n_fr - 1)
-    )
-
-    cb = fig.colorbar(
-        sm,
-        ax=ax_trace,
-        fraction=0.035,
-        pad=0.02
-    )
-
-    cb.ax.tick_params(
-        colors='#aaaaaa',
-        labelsize=7
-    )
-
-    cb.set_label(
-        'Frame',
-        color='#aaaaaa',
-        fontsize=8
-    )
-
+    sm = plt.cm.ScalarMappable(cmap='Oranges', norm=plt.Normalize(0, n_fr - 1))
+    cb = fig.colorbar(sm, ax=ax_trace, fraction=0.035, pad=0.02,
+                      use_gridspec=False)
+    cb.ax.tick_params(colors='#aaaaaa', labelsize=7)
+    cb.set_label('Frame', color='#aaaaaa', fontsize=8)
     state["cb_trace"] = cb
 
 # ============================================================
