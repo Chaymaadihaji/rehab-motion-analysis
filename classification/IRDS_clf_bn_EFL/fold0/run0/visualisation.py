@@ -9,19 +9,18 @@ from pathlib import Path
 
 # ============================================================
 # CONFIG — IRDS_clf_bn_EFL
-# Elbow Flexion Left — flexion du coude GAUCHE
 # ============================================================
 BASE          = Path(r"C:\Users\PC\rehab-motion-analysis\classification\IRDS_clf_bn_EFL\fold0\run0")
 EXERCISE_NAME = "IRDS_clf_bn_EFL"
 FPS           = 22
-VIDEO_DURATION = 10   # secondes
+VIDEO_DURATION = 10
+TRACE_STEP    = 3   # 1 squelette toutes les 3 frames
 
 DARK_BG   = "#0d0d1a"
 PANEL_BG  = "#12122a"
 JOINT_COL = "#ff5555"
 CHAIN_COLORS = ["#ffffff", "#4ecdc4", "#f7b731", "#a29bfe", "#fd79a8"]
 
-# NTU 25 joints
 CHAINS = [
     [0, 1, 20, 2, 3],
     [20, 4, 5, 6, 7],
@@ -30,12 +29,6 @@ CHAINS = [
     [0, 16, 17, 18, 19],
 ]
 
-# Bras GAUCHE — ce qui bouge pour EFL
-TRACE_JOINTS = [20, 4, 5, 6, 7]
-
-# ============================================================
-# FIGURE
-# ============================================================
 plt.rcParams.update({
     'figure.facecolor': DARK_BG,
     'axes.facecolor':   PANEL_BG,
@@ -56,9 +49,6 @@ state = dict(skel=None, bounds=None, cb_trace=None,
 
 title_obj = fig.suptitle("", fontsize=20, fontweight='bold', color='white', y=0.97)
 
-# ============================================================
-# HELPERS
-# ============================================================
 def get_skeleton(X, seq_idx):
     raw  = X[seq_idx]
     n_fr = raw.shape[1]
@@ -73,18 +63,6 @@ def compute_bounds(skel):
     return (skel[:,:,0].min()-pad, skel[:,:,0].max()+pad,
             skel[:,:,1].min()-pad, skel[:,:,1].max()+pad)
 
-def compute_trace_bounds(skel):
-    """Bounds zoomées sur les joints tracés."""
-    arm_x = skel[:, TRACE_JOINTS, 0].flatten()
-    arm_y = skel[:, TRACE_JOINTS, 1].flatten()
-    pad_x = max((arm_x.max() - arm_x.min()) * 0.35, 0.05)
-    pad_y = max((arm_y.max() - arm_y.min()) * 0.35, 0.05)
-    return (arm_x.min()-pad_x, arm_x.max()+pad_x,
-            arm_y.min()-pad_y, arm_y.max()+pad_y)
-
-# ============================================================
-# DRAW FRAME
-# ============================================================
 def draw_frame(fi):
     skel = state["skel"]
     x, y = pose_to_plot(skel[fi])
@@ -108,9 +86,6 @@ def draw_frame(fi):
     ax_anim.set_ylim(state["bounds"][2], state["bounds"][3])
     return []
 
-# ============================================================
-# TRACE
-# ============================================================
 def redraw_trace():
     if state["cb_trace"] is not None:
         try: state["cb_trace"].remove()
@@ -130,30 +105,22 @@ def redraw_trace():
     n_fr  = skel.shape[0]
     cmap  = matplotlib.colormaps["Oranges"]
 
-    # Trajectoire du bras gauche
-    for fi in range(n_fr):
+    # Squelette complet avec dégradé — step=3
+    for fi in range(0, n_fr, TRACE_STEP):
         t     = fi / max(n_fr - 1, 1)
         color = cmap(0.3 + 0.7 * t)
+        alpha = 0.3 + 0.5 * t
         x, y  = pose_to_plot(skel[fi])
-        ax_trace.plot(x[TRACE_JOINTS], y[TRACE_JOINTS],
-                      color=color, lw=2.2, alpha=0.55 + 0.45 * t)
-        ax_trace.scatter(x[TRACE_JOINTS], y[TRACE_JOINTS],
-                         color=color, s=12, alpha=0.55 + 0.45 * t)
+        for chain in CHAINS:
+            ax_trace.plot(x[chain], y[chain],
+                          color=color, lw=0.9, alpha=alpha)
 
-    # Squelette final en overlay
-    xf, yf = pose_to_plot(skel[-1])
-    for ci, chain in enumerate(CHAINS):
-        ax_trace.plot(xf[chain], yf[chain], color=CHAIN_COLORS[ci],
-                      lw=2.0, alpha=0.5)
-    used = sorted(set(sum(CHAINS, [])))
-    ax_trace.scatter(xf[used], yf[used], color=JOINT_COL, s=40, alpha=0.6)
-
-    # Bounds zoomées sur le bras gauche
-    xmin, xmax, ymin, ymax = compute_trace_bounds(skel)
+    # Mêmes bounds que l'animation
+    xmin, xmax, ymin, ymax = state["bounds"]
     ax_trace.set_xlim(xmin, xmax)
     ax_trace.set_ylim(ymin, ymax)
     ax_trace.set_aspect('equal', adjustable='box')
-    ax_trace.set_title("Trace — Bras gauche", fontsize=13, color="#ddddff")
+    ax_trace.set_title("Trace du mouvement", fontsize=14, color="#ddddff")
     ax_trace.tick_params(colors='#666688', labelsize=7)
 
     sm = plt.cm.ScalarMappable(cmap='Oranges', norm=plt.Normalize(0, n_fr-1))
@@ -163,9 +130,6 @@ def redraw_trace():
     cb.set_label('Frame', color='#aaaaaa', fontsize=8)
     state["cb_trace"] = cb
 
-# ============================================================
-# GENERATE ONE VIDEO
-# ============================================================
 def generate_video(X, class_id, cluster_id, rep_number, rep_idx, output_dir):
     print(f"    🎥 classe {class_id} | cluster {cluster_id} | rep {rep_number} | seq #{rep_idx}")
 
@@ -210,14 +174,13 @@ output_dir = BASE / "videos"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 class_dirs = sorted(BASE.glob("class_*"))
-print(f"  → {len(class_dirs)} classe(s) : {[d.name for d in class_dirs]}\n")
+print(f"  → {len(class_dirs)} classe(s)\n")
 
 for class_dir in class_dirs:
     class_id = class_dir.name.split("_")[-1]
     rep_csv  = class_dir / "representatives.csv"
-
     if not rep_csv.exists():
-        print(f"  ❌ representatives.csv absent : {class_dir}")
+        print(f"  ❌ representatives.csv absent")
         continue
 
     clusters_reps = {}
