@@ -15,26 +15,35 @@ CLASSIFICATION_DIR = ROOT
 FPS = 22
 VIDEO_DURATION = 10
 
+# ============================================================
+# COLORS
+# ============================================================
 DARK_BG   = "#0d0d1a"
 PANEL_BG  = "#12122a"
 JOINT_COL = "#ff5555"
-CHAIN_COLORS = ["#ffffff", "#4ecdc4", "#f7b731", "#a29bfe", "#fd79a8"]
 
+# ============================================================
+# KERAAL CHAINS — 11 joints
+# 0=bassin, 1=torse, 10=épaules
+# 2=épaule G, 4=coude G, 5=poignet G, 6=main G
+# 3=épaule D, 7=coude D, 8=poignet D, 9=main D  (à vérifier)
+# ============================================================
 CHAINS = [
-    [0, 1, 20, 2, 3],
-    [20, 4, 5, 6, 7],
-    [20, 8, 9, 10, 11],
-    [0, 12, 13, 14, 15],
-    [0, 16, 17, 18, 19],
+    [0, 1, 10, 2, 3],   # colonne + épaules
+    [10, 4, 5, 6],      # bras gauche
+    [10, 7, 8, 9],      # bras droit
 ]
-RIGHT_ARM = [20, 8, 9, 10, 11]
+CHAIN_COLORS = ["#ffffff", "#4ecdc4", "#f7b731"]
+TRACE_STEP   = 15
 
+# ============================================================
+# FIGURE
+# ============================================================
 plt.rcParams.update({
     'figure.facecolor': DARK_BG,
     'axes.facecolor':   PANEL_BG,
     'text.color':       'white'
 })
-
 fig = plt.figure(figsize=(14, 8))
 fig.patch.set_facecolor(DARK_BG)
 
@@ -44,30 +53,65 @@ gs = gridspec.GridSpec(1, 2, figure=fig,
 ax_anim  = fig.add_subplot(gs[0])
 ax_trace = fig.add_subplot(gs[1])
 
+# ============================================================
+# STATE
+# ============================================================
 state = dict(cluster=0, rep_idx=0, skel=None, bounds=None,
              cb_trace=None, exercise_name="", class_id="")
 
-title_obj = fig.suptitle("", fontsize=22, fontweight='bold', color='white', y=0.97)
+title_obj = fig.suptitle("", fontsize=18, fontweight='bold', color='white', y=0.97)
 
 def update_title():
     title_obj.set_text(
         f"Séquence #{state['rep_idx']}  |  {state['exercise_name']}"
         f"  |  Classe {state['class_id']}  |  Cluster {state['cluster']}")
 
+# ============================================================
+# SKELETON — 11 joints x 7 dims
+# ============================================================
 def get_skeleton(X, seq_idx):
-    raw  = X[seq_idx]
+    raw  = X[seq_idx]          # (77, n_frames)
     n_fr = raw.shape[1]
-    skel = raw.reshape(25, 3, n_fr).transpose(2, 0, 1)
-    return skel[:, :, :2]
+    data = raw.reshape(11, 7, n_fr)
+    skel = data.transpose(2, 0, 1)
+    xy   = skel[:, :, :2].copy()
+
+    # Interpolation frames aberrantes
+    SEUIL = 0.15
+    fi = 1
+    while fi < n_fr - 1:
+        diff = np.abs(xy[fi] - xy[fi-1]).max()
+        if diff > SEUIL:
+            fj = fi + 1
+            while fj < n_fr - 1:
+                if np.abs(xy[fj] - xy[fi-1]).max() <= SEUIL:
+                    break
+                fj += 1
+            for fk in range(fi, fj):
+                t = (fk - fi + 1) / (fj - fi + 1)
+                xy[fk] = (1-t) * xy[fi-1] + t * xy[fj]
+            fi = fj
+        else:
+            fi += 1
+    return xy
 
 def pose_to_plot(pose):
     return pose[:, 0], pose[:, 1]
 
 def compute_bounds(skel):
-    pad = 0.08
-    return (skel[:,:,0].min()-pad, skel[:,:,0].max()+pad,
-            skel[:,:,1].min()-pad, skel[:,:,1].max()+pad)
+    pad    = 0.1
+    x_vals = skel[:, :, 0].flatten()
+    y_vals = skel[:, :, 1].flatten()
+    return (
+        np.percentile(x_vals,  1) - pad,
+        np.percentile(x_vals, 99) + pad,
+        np.percentile(y_vals,  1) - pad,
+        np.percentile(y_vals, 99) + pad,
+    )
 
+# ============================================================
+# DRAW FRAME
+# ============================================================
 def draw_frame(fi):
     skel = state["skel"]
     x, y = pose_to_plot(skel[fi])
@@ -77,10 +121,10 @@ def draw_frame(fi):
     ax_anim.set_xticks([]); ax_anim.set_yticks([])
     for sp in ax_anim.spines.values(): sp.set_visible(False)
 
+    used = sorted(set(sum(CHAINS, [])))
     for ci, chain in enumerate(CHAINS):
         ax_anim.plot(x[chain], y[chain], color=CHAIN_COLORS[ci],
                      lw=3.5, solid_capstyle='round')
-    used = sorted(set(sum(CHAINS, [])))
     ax_anim.scatter(x[used], y[used], color=JOINT_COL, s=75)
 
     ax_anim.text(0.02, 0.97, f"Frame {fi+1} / {skel.shape[0]}",
@@ -91,7 +135,11 @@ def draw_frame(fi):
     ax_anim.set_ylim(state["bounds"][2], state["bounds"][3])
     return []
 
+# ============================================================
+# TRACE
+# ============================================================
 def redraw_trace():
+    # Supprimer ancienne colorbar + orphelines
     if state["cb_trace"] is not None:
         try: state["cb_trace"].remove()
         except Exception: pass
@@ -108,41 +156,38 @@ def redraw_trace():
     skel  = state["skel"]
     n_fr  = skel.shape[0]
     cmap  = matplotlib.colormaps["Oranges"]
+    xmin, xmax, ymin, ymax = state["bounds"]
 
-    for fi in range(n_fr):
+    # Squelettes fantômes
+    for fi in range(0, n_fr, TRACE_STEP):
         t     = fi / max(n_fr - 1, 1)
         color = cmap(0.3 + 0.7 * t)
+        alpha = 0.2 + 0.5 * t
         x, y  = pose_to_plot(skel[fi])
-        ax_trace.plot(x[RIGHT_ARM], y[RIGHT_ARM],
-                      color=color, lw=2.2, alpha=0.55 + 0.45 * t)
-        ax_trace.scatter(x[RIGHT_ARM], y[RIGHT_ARM],
-                         color=color, s=12, alpha=0.55 + 0.45 * t)
+        if (np.any(x < xmin) or np.any(x > xmax) or
+            np.any(y < ymin) or np.any(y > ymax)):
+            continue
+        for chain in CHAINS:
+            ax_trace.plot(x[chain], y[chain],
+                          color=color, lw=1.2, alpha=alpha)
 
-    # Squelette final
-    xf, yf = pose_to_plot(skel[-1])
-    for ci, chain in enumerate(CHAINS):
-        ax_trace.plot(xf[chain], yf[chain], color=CHAIN_COLORS[ci], lw=3)
-    used = sorted(set(sum(CHAINS, [])))
-    ax_trace.scatter(xf[used], yf[used], color=JOINT_COL, s=55)
-
-    # ── FIX : utiliser les mêmes bounds que l'animation ──────────────
-    xmin, xmax, ymin, ymax = state["bounds"]
     ax_trace.set_xlim(xmin, xmax)
     ax_trace.set_ylim(ymin, ymax)
-    # PAS de set_aspect('equal') — laisse matplotlib adapter
+    ax_trace.set_aspect('equal', adjustable='box')
     ax_trace.set_title("Trace du mouvement", fontsize=14, color="#ddddff")
-    ax_trace.tick_params(colors='#666688', labelsize=7)
 
-    sm = plt.cm.ScalarMappable(cmap='Oranges', norm=plt.Normalize(0, n_fr - 1))
+    sm = plt.cm.ScalarMappable(cmap='Oranges', norm=plt.Normalize(0, n_fr-1))
     cb = fig.colorbar(sm, ax=ax_trace, fraction=0.035, pad=0.02,
                       use_gridspec=False)
     cb.ax.tick_params(colors='#aaaaaa', labelsize=7)
     cb.set_label('Frame', color='#aaaaaa', fontsize=8)
     state["cb_trace"] = cb
 
+# ============================================================
+# GENERATE VIDEO
+# ============================================================
 def generate_video(X, exercise_name, class_id, cluster_id,
                    rep_number, rep_idx, output_dir):
-
     print(f"  🎥 classe {class_id} | cluster {cluster_id} | rep {rep_number} | seq #{rep_idx}")
 
     state["cluster"]       = cluster_id
@@ -165,27 +210,22 @@ def generate_video(X, exercise_name, class_id, cluster_id,
 
     ani = FuncAnimation(fig, update_video_frame,
                         frames=n_frames, interval=1000/FPS, repeat=False)
-
     output_path = output_dir / f"{exercise_name}_{class_id}_{cluster_id}_{rep_number}_{rep_idx}.mp4"
     writer = FFMpegWriter(fps=FPS, bitrate=3000)
     ani.save(output_path, writer=writer, dpi=180)
     print(f"  ✅ {output_path.name}")
 
-# ============================================================
-# MAIN LOOP
-# ============================================================
-exercise_dirs = sorted([d for d in CLASSIFICATION_DIR.iterdir()
-                        if d.is_dir() and d.name != "results"])
 
-print(f"\n{len(exercise_dirs)} exercices trouvés\n")
+exercise_dirs = sorted([d for d in CLASSIFICATION_DIR.iterdir()
+                        if d.is_dir() and d.name.startswith("KERAAL")])
+
+print(f"\n{len(exercise_dirs)} exercices KERAAL trouvés\n")
 
 for exercise_dir in exercise_dirs:
 
-    train_file = exercise_dir / "fold0/run0/x_train_fold0.npy"
-    test_file  = exercise_dir / "fold0/run0/x_test_fold0.npy"
-    if not train_file.exists():
-        train_file = exercise_dir / "fold0/x_train_fold0.npy"
-        test_file  = exercise_dir / "fold0/x_test_fold0.npy"
+    # Chercher x_train / x_test
+    train_file = exercise_dir / "fold0" / "run0" / "x_train_fold0.npy"
+    test_file  = exercise_dir / "fold0" / "run0" / "x_test_fold0.npy"
     if not train_file.exists():
         print(f"⚠️  Pas de données pour {exercise_dir.name}, ignoré")
         continue
@@ -197,26 +237,24 @@ for exercise_dir in exercise_dirs:
     X = np.concatenate([np.load(train_file), np.load(test_file)], axis=0)
     print(f"  → {X.shape[0]} séquences | shape = {X.shape}")
 
-    class_dirs = sorted(exercise_dir.glob("fold0/run0/class_*"))
+    # Chercher class_C, class_E1, class_E2, class_E3
+    class_dirs = sorted((exercise_dir / "fold0" / "run0").glob("class_*"))
+
     if not class_dirs:
-        class_dirs = sorted(exercise_dir.glob("fold0/class_*"))
-    if not class_dirs:
-        class_dirs = sorted(exercise_dir.glob("class_*"))
-    if not class_dirs:
-        print(f"  ⚠️  Pas de dossiers class_* trouvés")
+        print(f"   Pas de dossiers class_* trouvés")
         continue
 
-    print(f"  → {len(class_dirs)} classe(s) trouvée(s)")
+    print(f"  → {len(class_dirs)} classe(s) : {[d.name for d in class_dirs]}")
 
-    output_dir = exercise_dir / "fold0/run0/videos"
+    output_dir = exercise_dir / "fold0" / "run0" / "videos"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for class_dir in class_dirs:
-        class_id = class_dir.name.split("_")[-1]
+        class_id = class_dir.name.replace("class_", "")  # C, E1, E2, E3
         rep_csv  = class_dir / "representatives.csv"
 
         if not rep_csv.exists():
-            print(f"  ❌ representatives.csv absent : {class_dir}")
+            print(f"   representatives.csv absent : {class_dir}")
             continue
 
         clusters_reps = {}
@@ -226,9 +264,8 @@ for exercise_dir in exercise_dirs:
                 idx = int(row["sequence_index"])
                 clusters_reps.setdefault(k, []).append(idx)
 
-        n_clusters = len(clusters_reps)
-        n_total    = sum(len(v) for v in clusters_reps.values())
-        print(f"\n  Classe {class_id} : {n_clusters} clusters | {n_total} séquences représentantes")
+        n_total = sum(len(v) for v in clusters_reps.values())
+        print(f"\n  Classe {class_id} : {len(clusters_reps)} clusters | {n_total} séquences")
 
         for cluster_id in sorted(clusters_reps):
             rep_list = clusters_reps[cluster_id]
@@ -237,4 +274,4 @@ for exercise_dir in exercise_dirs:
                 generate_video(X, exercise_dir.name, class_id,
                                cluster_id, rep_number, rep_idx, output_dir)
 
-print("\n✅ Toutes les vidéos ont été générées.")
+print("\n✅ Toutes les vidéos KERAAL ont été générées.")
